@@ -58,7 +58,87 @@ class GodNodeCore:
                 print("Loaded multilingual-e5-large")
             except Exception as e:
                 print(f"Encoder load failed: {e}")
-                self.encoder = None
+               def permute(self, v: np.ndarray, steps: int = 1) -> np.ndarray:
+        """The core shift operator: encodes 'Time' as 'Space'"""
+        return np.roll(v, steps)
+
+    def compose_with_narrative(self, theme: str, length: int = 16):
+        state = self.vec(theme)
+        # 1. Initialize a 'Narrative Vector' to store the trajectory
+        narrative_state = np.zeros(self.dim)
+        sequence = []
+        prev2 = prev1 = None
+
+        for pos in range(length):
+            role_name = ["Subject", "Verb", "Object", "Modifier"][pos % 4]
+            role_v = self.role(role_name)
+
+            # 2. Bind the local theme with the global narrative history
+            # This ensures the 'Subject' of line 5 knows the 'Object' of line 1
+            context = self.bind(self.bundle([state, narrative_state]), role_v)
+            
+            cleaned = self.cleanup(context)
+            candidates = self.approx_nearest(cleaned, k=BEAM_WIDTH)
+
+            # [Candidate scoring logic remains the same]
+            # ... (selecting 'word') ...
+
+            sequence.append(word)
+            wv = self.vec(word)
+
+            # 3. PERMUTATION STEP: 
+            # Shift the entire narrative to make room for the new thought
+            # Narrative = ρ(Narrative) + Current_Word_Vector
+            narrative_state = self.bundle([self.permute(narrative_state, 1), wv])
+            
+            # 4. Update local state
+            state = self.bundle([state * 0.65, wv * 0.35])
+            prev2, prev1 = prev1, word
+
+        return " ".join(sequence)
+     self.encoder = None
+        def thinking_compose(self, theme: str, length: int = 16, variants: int = 3):
+        """
+        System 2 Reasoning: Generates variants, recalls them to check 
+        coherence, and selects the most 'memorable' one.
+        """
+        best_poem = ""
+        highest_coherence = -1.0
+
+        for _ in range(variants):
+            # 1. Generate a candidate via Narrative Permutation
+            state = self.vec(theme)
+            narrative_state = np.zeros(self.dim)
+            candidate_seq = []
+            
+            for pos in range(length):
+                role_v = self.role(["Subject", "Verb", "Object", "Modifier"][pos % 4])
+                context = self.bind(self.bundle([state, narrative_state]), role_v)
+                
+                # Add a touch of creative noise per 'thought'
+                context += rng.normal(0, 0.02, self.dim) 
+                
+                word = self.approx_nearest(self.cleanup(context), k=1)[0][0]
+                candidate_seq.append(word)
+                
+                # Permute & Update
+                wv = self.vec(word)
+                narrative_state = self.bundle([self.permute(narrative_state, 1), wv])
+                state = self.bundle([state * 0.6, wv * 0.4])
+
+            # 2. RECALL STEP: Can the brain remember what it just thought?
+            # We measure 'Coherence' by how many words are correctly recovered
+            recalled_words = self.recall(narrative_state, length)
+            
+            # Coherence Score = Intersection / Total
+            matches = sum(1 for a, b in zip(candidate_seq, recalled_words) if a == b)
+            coherence = matches / length
+
+            if coherence > highest_coherence:
+                highest_coherence = coherence
+                best_poem = " ".join(candidate_seq)
+
+        return best_poem, highest_coherence
 
     def vec(self, text: str, normalize: bool = True) -> np.ndarray:
         text = text.strip().lower()
@@ -91,7 +171,7 @@ class GodNodeCore:
             v /= norm
         self.lexicon[text] = v
         return v.copy()
-
+    
     def role(self, role_name: str) -> np.ndarray:
         if role_name not in self.role_vectors:
             base = self.vec(role_name)
